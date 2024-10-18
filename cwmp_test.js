@@ -43,17 +43,16 @@ class CWMPManager {
         }); 
         
         this.http.post('*', (req, res) => {
-            this.ev_count++;
-            let task = this.tasks[0];
-            let m = (task !== undefined) ? this.task_map[task.task](task.props) : 'OK';
-            if(typeof req.body == 'string') {
-                res.send(m);
-            }else if(req.body['soap:envelope'] != undefined) {
+            //let task = this.tasks[0];
+            //let m = (task !== undefined) ? this.task_map[task.task](task.props) : 'OK';
+            //if(typeof req.body == 'string') {
+            //    res.send(m);
+            /*}else*/ if(req.body['soap:envelope'] != undefined) {
                 let ev = Object.keys(req.body['soap:envelope']['soap:body'])[0];
-                if(task !== undefined && this.ev_count > 1) {
-                    task.callback(req.body['soap:envelope']['soap:body'][ev]);
-                    this.tasks.shift();
-                }
+                //if(task !== undefined && this.ev_count > 1) {
+                //    task.callback(req.body['soap:envelope']['soap:body'][ev]);
+                //    this.tasks.shift();
+                //}
                 if(this.events.filter(e => e.event == ev).length > 0) {
                     this.events.filter(e => e.event == ev)[0].action(req, res, ev);
                 }else{
@@ -65,16 +64,38 @@ class CWMPManager {
         });
 
         this.add_event('cwmp:inform', (req, res, ev) => {
-            console.log('Inform');
-            let transaction_id = req.body['soap:envelope']['soap:header']['cwmp:id']['_'];
+            this.ev_count++;
             let device_id = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-            var obj = this.sort_cwmp_parameters(req.body['soap:envelope']['soap:body'][ev].parameterlist.parametervaluestruct);
-            obj.deviceid = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-            console.log(device_id)
-            this.add_device(obj);
-            let xml = _ack_xml(transaction_id, 'cwmp:InformResponse');
+            if(this.tasks[device_id] == undefined) {
+                this.tasks[device_id] = [];
+            }
+            let task = this.tasks[device_id][0];
+            let m = (task !== undefined) ? this.task_map[task.task](task.props) : 'OK';
+            if(this.ev_count > 1) {
+                if(task !== undefined) {
+                    task.callback(req.body['soap:envelope']['soap:body'][ev]);
+                    this.tasks[device_id].shift();
+                }
+                if(this.devices[device_id] == undefined) {
+                    let data = this.gather_all_data({ device_id: device_id });
+                    this.add_device({ deviceid: device_id, ...data });
+                }
+            }
+
+
+            //let transaction_id = req.body['soap:envelope']['soap:header']['cwmp:id']['_'];
+            console.log(`EVENT IS ${ev}`);
+            console.log(device_id);
+            //var obj = this.sort_cwmp_parameters(req.body['soap:envelope']['soap:body'][ev].parameterlist.parametervaluestruct);
+            //obj.deviceid = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
+            //console.log(device_id)
+            //this.add_device(obj);
+            //let dd = this.gather_all_data({ deviceid: device_id });
+            //console.log(dd);
+            //let xml = _ack_xml(generateCwmpID(), 'cwmp:InformResponse');
             //console.log(obj)
-            res.send(xml);
+            //res.send(xml);
+            res.send(m)
         });
         
         this.add_event('soap:fault', (req, res, ev) => {
@@ -150,8 +171,23 @@ class CWMPManager {
         console.log(device);
     }
 
-    add_task(task, props, callback) {
-        this.tasks.push({ task, props, callback });
+    add_task(device_id, task, props, callback) {
+        if(this.tasks[device_id] == undefined) {
+            this.tasks[device_id] = [];
+        }
+        this.tasks[device_id].push({ task, props, callback });
+    }
+
+    gather_all_data(device) {
+        //console.log(this.tasks);
+        console.log(device);
+        this.add_task(device.device_id, 'get_all_params', {device_path: 'Device.' }, (param) => {
+            if(param != undefined) {
+                //console.log(param);
+                console.log('params')
+                console.log(param);
+            }
+        });
     }
 }
 
@@ -250,22 +286,13 @@ let generateCwmpID = () => {
 };
 
 const cwmp = new CWMPManager();
-cwmp.add_task('get_param', { deviceid: '1234', param_name: 'Device.DeviceInfo.SerialNumber' }, (param) => {
-    console.log('params')
-    //console.log(param.parameterlist.parametervaluestruct);
-});
-
-cwmp.add_task('reboot', { deviceid: '1234' }, (data) => {
-    console.log('reboot')
-    console.log(data)
-})
-
-//cwmp.add_task('set_param', { deviceid: '1234', parameters: [{ name: 'Device.DeviceInfo.SerialNumber', value: '1234' }] }, (param) => {
-//    console.log('params are')
-//    console.log(param.parameterlist.parametervaluestruct);
+//cwmp.add_task('C074ADEEE3BC', 'get_param', { deviceid: '1234', param_name: 'Device.DeviceInfo.SerialNumber' }, (param) => {
+//    console.log('params')
+//    //console.log(param.parameterlist.parametervaluestruct);
 //});
-
-cwmp.add_task('get_all_params', { deviceid: '1234', device_path:'Device.' }, (param) => {
-    console.log('params are')
-    console.log(param.parameterlist.parameterinfostruct);
-})
+//
+//setTimeout(() => {
+//    cwmp.add_task('C074ADEEE3BC', 'reboot', {}, (data) => {
+//        console.log('reboot')
+//    })
+//}, 5000);
