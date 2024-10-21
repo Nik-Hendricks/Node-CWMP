@@ -43,6 +43,7 @@ To add a task for a device:
 cwmp.add_task('DEVICE_ID', 'get_param', { param_name: 'Device.DeviceInfo.SerialNumber' }, (param) => {
     console.log('Received Parameter:', param);
 });
+```
 
 ### Todo
 - [ ] Add device authentication
