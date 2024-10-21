@@ -43,26 +43,36 @@ class CWMPManager {
         }); 
         
         this.http.post('*', (req, res) => {
+            console.log(this.devices)
             if(req.body['soap:envelope'] != undefined) {
                 let ev = Object.keys(req.body['soap:envelope']['soap:body'])[0];
                 if(Object.keys(req.body['soap:envelope']['soap:body'])[0] == 'cwmp:inform') {
                     let device_id = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-                    this.devices[req.connection.remoteAddress] = {
-                        event_count: 0,
-                        remote_ip: req.connection.remoteAddress,
-                        device_id: device_id
+                    if(this.devices[req.connection.remoteAddress] == undefined) {
+                        this.devices[req.connection.remoteAddress] = {
+                            event_count: 0,
+                            remote_ip: req.connection.remoteAddress,
+                            device_id: device_id,
+                        }
+                        this.gather_all_data(device_id, req.body['soap:envelope']['soap:body'][ev]).then((data) => {
+                            this.devices[req.connection.remoteAddress].data = data;
+                        })
                     }
                     console.log(`Device ${device_id} event is ${ev}`);
                 }
                 if(this.devices[req.connection.remoteAddress] !== undefined && this.devices[req.connection.remoteAddress].receive_mode == true) {
                     let d = this.devices[req.connection.remoteAddress];
                     let tasks = (this.tasks[d.device_id] == undefined) ? undefined : this.tasks[d.device_id][0];
-                    tasks.callback(req.body['soap:envelope']['soap:body'][ev]);
-                    this.tasks[d.device_id].shift();
-                    d.receive_mode = false;
-                    return;
+                    if(tasks !== undefined) {
+                        tasks.callback(req.body['soap:envelope']['soap:body'][ev]);
+                        this.tasks[d.device_id].shift();
+                        d.receive_mode = false;
+                        return;
+                    }else{
+                        console.log('No tasks');
+                    }
                 }
-                console.log(req.body['soap:envelope']['soap:body']);
+                //console.log(req.body['soap:envelope']['soap:body']);
                 if(this.events.filter(e => e.event == ev).length > 0) {
                     this.events.filter(e => e.event == ev)[0].action(req, res, ev);
                 }else{
@@ -79,7 +89,6 @@ class CWMPManager {
 
         this.add_event('cwmp:inform', (req, res, ev) => {
             let device_id = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-            console.log(this.devices[req.connection.remoteAddress]);
             this.devices[req.connection.remoteAddress].event_count++;
             res.send(_ack_xml(generateCwmpID(), 'InformResponse'));
         });
@@ -145,12 +154,46 @@ class CWMPManager {
                 //console.log(node);
             });
             node['_object'] = true;
-            node[key] = {
-                '_value': param.value['_'],
-                '_object': param.value['$']['xsi:type'] == 'xsd:object' ? true : false
-            };
+            if(param.value['_'] !== undefined) {
+                if(node[key] == undefined) {
+                    node[key] = {};
+                }
+                node[key]['_value'] = param.value['_'];
+            }
+            if(param.value['$']['xsi:type'] !== undefined) {
+                if(node[key] == undefined) {
+                    node[key] = {};
+                }
+                node[key]['_object'] = param.value['$']['xsi:type'] == 'xsd:object' ? true : false;
+            }
+
         });
         return obj;
+    }
+
+    sort_cwmp_parameters_info(info, values) {
+        let obj = {};
+        info.forEach((param) => {
+            let path = param.name.split('.');
+            let key = path.pop();
+            let node = obj;
+            path.forEach((p) => {
+                if (!node.hasOwnProperty(p)) {
+                    node[p] = {
+                        '_value': this.get_obj_value(values, path),
+                        '_object': false,
+                        '_writable': param['writable'],
+                    };
+                }
+                node = node[p];
+            });
+            node['_object'] = true;
+        });
+        return obj;
+    }
+
+    get_obj_value(obj, path) {
+        return path.reduce((xs, x) => (xs && xs[x]) ? xs[x] : null, obj);
     }
 
     summon_device(device) {
@@ -164,16 +207,14 @@ class CWMPManager {
         this.tasks[device_id].push({ task, props, callback });
     }
 
-    gather_all_data(device) {
-        //console.log(this.tasks);
-        console.log(device);
-        this.add_task(device.device_id, 'get_all_params', {device_path: 'Device.' }, (param) => {
-            if(param != undefined) {
-                //console.log(param);
-                console.log('params')
-                console.log(param);
-            }
-        });
+    gather_all_data(device_id, inform_data) {
+        return new Promise(resolve => {
+            this.add_task(device_id, 'get_all_params', {device_path: 'Device.' }, (ps) => {
+                if(ps != undefined) {
+                    resolve(this.sort_cwmp_parameters_info(ps.parameterlist.parameterinfostruct, this.sort_cwmp_parameters(inform_data['parameterlist']['parametervaluestruct'])))
+                }
+            }); 
+        }) 
     }
 }
 
@@ -277,18 +318,14 @@ const cwmp = new CWMPManager();
 //    //console.log(param.parameterlist.parametervaluestruct);
 //});
 //
-setTimeout(() => {
-    cwmp.add_task('C074ADEEE3BC', 'get_all_params', {device_path: 'Device.'}, (data) => {
-        console.log('OTHER REQUEST')
-        console.log(data);
-    })
-}, 5000);
+//setTimeout(() => {
+//    cwmp.add_task('C074ADEEE3BC', 'get_all_params', {device_path: 'Device.'}, (data) => {
+//        console.log('OTHER REQUEST')
+//        console.log(data);
+//    })
+//}, 5000);
 
-setTimeout(() => {
-    cwmp.add_task('C074ADEEE3BC', 'get_all_params', {device_path: 'Device.'}, (data) => {
-        console.log('OTHER REQUEST')
-        console.log(data)
-    })
-}, 10000);
+
+
 
 
