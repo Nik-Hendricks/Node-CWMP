@@ -30,7 +30,7 @@ Node-CWMP is a lightweight Node.js library for building and managing a CPE WAN M
     ```javascript
     const cwmp = new CWMPManager();
     ```
-    
+
 
 ## Usage
 
@@ -43,3 +43,8 @@ To add a task for a device:
 cwmp.add_task('DEVICE_ID', 'get_param', { param_name: 'Device.DeviceInfo.SerialNumber' }, (param) => {
     console.log('Received Parameter:', param);
 });
+
+### Todo
+- [ ] Add device authentication
+- [ ] Implement all CWMP methods
+- [ ] Add logging support
