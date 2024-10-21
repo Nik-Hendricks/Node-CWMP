@@ -1,7 +1,6 @@
 const http          = require('http');
 const fs            = require('fs');
 const express       = require('express'); 
-const nedb          = require('nedb');
 const bodyParser    = require('body-parser');
 const crypto        = require('crypto');
 require('body-parser-xml')(bodyParser);
@@ -11,10 +10,6 @@ class CWMPManager {
         this.http = express();
         this.port = 7547;
         this.ev_count = 0;
-        this.DB = {
-            devices: new nedb({ filename: 'DB/devices.db', autoload: true }),
-            logs: new nedb({ filename: 'DB/logs.db', autoload: true })
-        }
 
         this.events = [];
         this.devices = [];
@@ -40,6 +35,7 @@ class CWMPManager {
 
         this.http.get('*', (req, res) => {
             console.log(req)
+            res.send('OK');
         }); 
         
         this.http.post('*', (req, res) => {
@@ -125,16 +121,6 @@ class CWMPManager {
 
     add_event(event, action) {
         this.events.push({ event, action });
-    }
-
-    add_device(device) {
-        let id = device.deviceid;
-        this.DB.devices.update({ _id: id }, { $set: device }, { upsert: true }, (err, numReplaced, upsert) => {
-            if (err) {
-                console.log(err);
-            }
-        });
-        this.devices[id] = device;
     }
 
     sort_cwmp_parameters(parameters) {
@@ -312,18 +298,9 @@ let generateCwmpID = () => {
     return crypto.randomBytes(4).toString('hex'); // Generates a random ID
 };
 
-const cwmp = new CWMPManager();
-//cwmp.add_task('C074ADEEE3BC', 'get_param', { deviceid: '1234', param_name: 'Device.DeviceInfo.SerialNumber' }, (param) => {
-//    console.log('params')
-//    //console.log(param.parameterlist.parametervaluestruct);
-//});
-//
-//setTimeout(() => {
-//    cwmp.add_task('C074ADEEE3BC', 'get_all_params', {device_path: 'Device.'}, (data) => {
-//        console.log('OTHER REQUEST')
-//        console.log(data);
-//    })
-//}, 5000);
+
+exports.CWMPManager = CWMPManager;
+
 
 
 
