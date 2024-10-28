@@ -1,9 +1,11 @@
-const http          = require('http');
-const fs            = require('fs');
-const express       = require('express'); 
-const bodyParser    = require('body-parser');
-const crypto        = require('crypto');
-require('body-parser-xml')(bodyParser);
+import http from 'http';
+import fs from 'fs';
+import express from 'express';
+import bodyParser from 'body-parser';
+import crypto from 'crypto';
+import BodyParser from 'body-parser-xml';
+
+BodyParser(bodyParser);
 
 class CWMPManager {
     constructor() {
@@ -12,7 +14,7 @@ class CWMPManager {
         this.ev_count = 0;
 
         this.events = [];
-        this.devices = [];
+        this._devices = {};
         this.tasks = [];
 
         this.task_map = {
@@ -39,33 +41,29 @@ class CWMPManager {
         }); 
         
         this.http.post('*', (req, res) => {
-            console.log(this.devices)
             if(req.body['soap:envelope'] != undefined) {
                 let ev = Object.keys(req.body['soap:envelope']['soap:body'])[0];
                 if(Object.keys(req.body['soap:envelope']['soap:body'])[0] == 'cwmp:inform') {
                     let device_id = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-                    if(this.devices[req.connection.remoteAddress] == undefined) {
-                        this.devices[req.connection.remoteAddress] = {
+                    if(this._devices[req.connection.remoteAddress] == undefined) {
+                        this._devices[req.connection.remoteAddress] = {
                             event_count: 0,
                             remote_ip: req.connection.remoteAddress,
                             device_id: device_id,
                         }
                         this.gather_all_data(device_id, req.body['soap:envelope']['soap:body'][ev]).then((data) => {
-                            this.devices[req.connection.remoteAddress].data = data;
+                            this._devices[req.connection.remoteAddress].data = data;
                         })
                     }
-                    console.log(`Device ${device_id} event is ${ev}`);
                 }
-                if(this.devices[req.connection.remoteAddress] !== undefined && this.devices[req.connection.remoteAddress].receive_mode == true) {
-                    let d = this.devices[req.connection.remoteAddress];
+                if(this._devices[req.connection.remoteAddress] !== undefined && this._devices[req.connection.remoteAddress].receive_mode == true) {
+                    let d = this._devices[req.connection.remoteAddress];
                     let tasks = (this.tasks[d.device_id] == undefined) ? undefined : this.tasks[d.device_id][0];
                     if(tasks !== undefined) {
                         tasks.callback(req.body['soap:envelope']['soap:body'][ev]);
                         this.tasks[d.device_id].shift();
                         d.receive_mode = false;
                         return;
-                    }else{
-                        console.log('No tasks');
                     }
                 }
                 //console.log(req.body['soap:envelope']['soap:body']);
@@ -75,7 +73,7 @@ class CWMPManager {
                     res.send('OK');
                 }
             }else{
-                let d = this.devices[req.connection.remoteAddress];
+                let d = this._devices[req.connection.remoteAddress];
                 let tasks = (this.tasks[d.device_id] == undefined) ? undefined : this.tasks[d.device_id][0];
                 let m = (tasks !== undefined) ? this.task_map[tasks.task](tasks.props) : 'OK';
                 res.send(m);
@@ -85,7 +83,7 @@ class CWMPManager {
 
         this.add_event('cwmp:inform', (req, res, ev) => {
             let device_id = req.body['soap:envelope']['soap:body'][ev].deviceid.serialnumber;
-            this.devices[req.connection.remoteAddress].event_count++;
+            this._devices[req.connection.remoteAddress].event_count++;
             res.send(_ack_xml(generateCwmpID(), 'InformResponse'));
         });
         
@@ -94,14 +92,6 @@ class CWMPManager {
             console.log(req.body);  
             console.log(JSON.stringify(req.body));
         })
-        
-        //this.add_event('cwmp:getparametervaluesresponse', (req, res, ev) => {
-        //    console.log('GetParameterValuesResponse');
-        //    console.log(req.body);
-        //    //console.log(JSON.stringify(req.body));
-        //    res.send('OK');
-        //})
-
     }
 
     createServer() {
@@ -123,67 +113,107 @@ class CWMPManager {
         this.events.push({ event, action });
     }
 
-    sort_cwmp_parameters(parameters) {
-        let obj = {};
-        parameters.forEach((param) => {
-            let path = param.name.split('.');
-            let key = path.pop();
-            let node = obj;
-            path.forEach((p) => {
-                if (!node.hasOwnProperty(p)) {
-                    node[p] = {
-                        '_value': null,
-                        '_object': false
-                    };
-                }
-                node = node[p];
-                //console.log(node);
-            });
-            node['_object'] = true;
-            if(param.value['_'] !== undefined) {
-                if(node[key] == undefined) {
-                    node[key] = {};
-                }
-                node[key]['_value'] = param.value['_'];
-            }
-            if(param.value['$']['xsi:type'] !== undefined) {
-                if(node[key] == undefined) {
-                    node[key] = {};
-                }
-                node[key]['_object'] = param.value['$']['xsi:type'] == 'xsd:object' ? true : false;
-            }
 
-        });
-        return obj;
+
+    trim_parsed_xml_obj(obj, keep) {
+        var ret = [];
+        for(var key in obj) {
+            if(obj[key] !== undefined) {
+                ret[`${obj[key].name}`] = {[keep]: obj[key][keep]};
+            }
+        }
+        return ret;
+    }
+    
+    create_parameter_value_tree(info) {
+        let obj = {};
+        let data = this.trim_parsed_xml_obj(info, 'value')
+        const tree = {};
+        for (const key in data) {
+          const segments = key.split('.');
+          let current = tree;
+          for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            if(segment == '') {
+                current._value = data[key].value;
+            }else if (i === segments.length - 1) {
+              current[segment] = { _value: data[key].value };
+            } else {
+              if (!current[segment]) {
+                current[segment] = {};
+              }
+              current = current[segment];
+            }
+          }
+        }
+   
+        return tree;
     }
 
-    sort_cwmp_parameters_info(info, values) {
+    create_parameter_info_tree(info, values) {
         let obj = {};
-        info.forEach((param) => {
-            let path = param.name.split('.');
-            let key = path.pop();
-            let node = obj;
-            path.forEach((p) => {
-                if (!node.hasOwnProperty(p)) {
-                    node[p] = {
-                        '_value': this.get_obj_value(values, path),
-                        '_object': false,
-                        '_writable': param['writable'],
-                    };
+        let data = this.trim_parsed_xml_obj(info, 'writable')
+        let value_tree = this.create_parameter_value_tree(values);
+        const tree = {};
+        for (const key in data) {
+          const segments = key.split('.');
+          let current = tree;
+          for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            if(segment == '') {
+                current._writable = (data[key].writable == "true") ? true : false;
+                current._value = this.get_obj_value(value_tree, segments.join('.'));
+            }else if (i === segments.length - 1) {
+                current[segment] = { 
+                    _writable: (data[key].writable == "true") ? true : false,
+                    _value: this.get_obj_value(value_tree, segments.join('.'))
+                };
+            } else {
+              if (!current[segment]) {
+                current[segment] = {};
+              }
+              current = current[segment];
+            }
+          }
+        }
+
+        let is_obj = (node) => {
+            let ret = false;
+            for (const key in node) {
+                if(typeof node[key] === 'object') {
+                    ret = true;
                 }
-                node = node[p];
-            });
-            node['_object'] = true;
-        });
-        return obj;
+            }
+            return ret;
+        }
+
+        const determineObject = (node) => {
+            for (const key in node) {
+                if (typeof node[key] === 'object') {
+                    node[key]._object = determineObject(node[key]);
+                }
+            }
+            console.log(node);
+            return is_obj(node);
+        };
+
+        determineObject(tree);
+
+    
+        return tree;
     }
+
 
     get_obj_value(obj, path) {
-        return path.reduce((xs, x) => (xs && xs[x]) ? xs[x] : null, obj);
-    }
-
-    summon_device(device) {
-        console.log(device);
+        //get the value from the values tree "obj" using the path from the info tree "path" which is in format "Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress"
+        let path_array = path.split('.');
+        let node = obj;
+        path_array.forEach((p) => {
+            if(node[p] !== undefined) {
+                node = node[p];
+            }
+        });
+        return node['_value'] !== undefined ? node['_value']['_'] : undefined;
     }
 
     add_task(device_id, task, props, callback) {
@@ -197,7 +227,7 @@ class CWMPManager {
         return new Promise(resolve => {
             this.add_task(device_id, 'get_all_params', {device_path: 'Device.' }, (ps) => {
                 if(ps != undefined) {
-                    resolve(this.sort_cwmp_parameters_info(ps.parameterlist.parameterinfostruct, this.sort_cwmp_parameters(inform_data['parameterlist']['parametervaluestruct'])))
+                    resolve(this.create_parameter_info_tree(ps.parameterlist.parameterinfostruct, inform_data['parameterlist']['parametervaluestruct']));
                 }
             }); 
         }) 
@@ -298,8 +328,7 @@ let generateCwmpID = () => {
     return crypto.randomBytes(4).toString('hex'); // Generates a random ID
 };
 
-
-exports.CWMPManager = CWMPManager;
+export default CWMPManager;
 
 
 
