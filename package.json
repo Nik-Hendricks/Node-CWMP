@@ -7,7 +7,7 @@
   },
   "name": "node-cwmp",
   "description": "Node-CWMP is a lightweight Node.js library for building and managing a CPE WAN Management Protocol (CWMP) server. It allows you to interact with devices, handle CWMP messages, and manage parameters through SOAP requests. This library is useful for TR-069 management server implementation.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "cwmp.js",
   "devDependencies": {},
   "scripts": {

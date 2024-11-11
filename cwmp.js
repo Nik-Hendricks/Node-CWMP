@@ -30,13 +30,17 @@ class CWMPManager {
             },
             'get_all_params': (props) => {
                 return _get_all_params(props.device_path);
-            }
+            },
+            'setParameterValues': (props) => {
+                return _set_cwmp_parameters(generateCwmpID(), props.parameters);
+            },
         }
 
         this.createServer();
 
         this.http.get('*', (req, res) => {
-            console.log(req)
+            console.log(`GET: ${req.url}`);
+            console.log(`soap ${req.body['soap:envelope']}`);
             res.send('OK');
         }); 
         
@@ -60,7 +64,8 @@ class CWMPManager {
                     let d = this._devices[req.connection.remoteAddress];
                     let tasks = (this.tasks[d.device_id] == undefined) ? undefined : this.tasks[d.device_id][0];
                     if(tasks !== undefined) {
-                        tasks.callback(req.body['soap:envelope']['soap:body'][ev]);
+                        console.log(`Task: ${tasks.task}`);
+                        tasks.callback(req.body['soap:envelope']['soap:body'][ev])
                         this.tasks[d.device_id].shift();
                         d.receive_mode = false;
                         return;
@@ -112,8 +117,6 @@ class CWMPManager {
     add_event(event, action) {
         this.events.push({ event, action });
     }
-
-
 
     trim_parsed_xml_obj(obj, keep) {
         var ret = [];
@@ -193,7 +196,6 @@ class CWMPManager {
                     node[key]._object = determineObject(node[key]);
                 }
             }
-            console.log(node);
             return is_obj(node);
         };
 
@@ -202,7 +204,6 @@ class CWMPManager {
     
         return tree;
     }
-
 
     get_obj_value(obj, path) {
         //get the value from the values tree "obj" using the path from the info tree "path" which is in format "Device.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress"
@@ -231,6 +232,14 @@ class CWMPManager {
                 }
             }); 
         }) 
+    }
+
+    set_device_parameters(device_id, parameters) {
+        return new Promise (resolve => {
+            this.add_task(device_id, 'setParameterValues', {parameters}, (ps) => {
+                resolve(ps);
+            });
+        })
     }
 }
 
@@ -285,6 +294,10 @@ let _get_param_xml = (transaction_id, param) => {
 }
 
 let _set_cwmp_parameters = (transaction_id, parameters) => {
+    parameters = Object.keys(parameters).map((key) => {
+        return {name: key, value: parameters[key]};
+    });
+    console.log(parameters);
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
     <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
         <soap:Header>
@@ -293,17 +306,19 @@ let _set_cwmp_parameters = (transaction_id, parameters) => {
         <soap:Body>
             <cwmp:SetParameterValues>
                 <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[${parameters.length}]">
-                    ${parameters.map((param) => {
+                    ${parameters.map((p) => {
                         return `<ParameterValueStruct>
-                        <Name>${param.name}</Name>
-                        <Value xsi:type="xsd:string">${param.value}</Value>
-                    </ParameterValueStruct>`
+                            <Name>${p.name}</Name>
+                            <Value xsi:type="xsd:string">${p.value}</Value>
+                        </ParameterValueStruct>`;
                     })}
                 </ParameterList>
             </cwmp:SetParameterValues>
         </soap:Body>
     </soap:Envelope>
     </xml>`;
+
+    return xml;
 };
 
 let _get_all_params = (device_path) => {
