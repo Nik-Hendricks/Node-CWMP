@@ -31,6 +31,9 @@ class CWMPManager {
             'get_all_params': (props) => {
                 return _get_all_params(props.device_path);
             },
+            'get_all_param_values': (props) => {
+                return _get_all_param_values(props.device_path);
+            },
             'setParameterValues': (props) => {
                 return _set_cwmp_parameters(generateCwmpID(), props.parameters);
             },
@@ -154,9 +157,15 @@ class CWMPManager {
     }
 
     create_parameter_info_tree(info, values) {
+        console.log(info)
         let obj = {};
         let data = this.trim_parsed_xml_obj(info, 'writable')
         let value_tree = this.create_parameter_value_tree(values);
+        let v = [];
+
+        values.forEach((x) => {
+            v[x.name] = x.value['$']['xsi:type']
+        })
         const tree = {};
         for (const key in data) {
           const segments = key.split('.');
@@ -166,10 +175,12 @@ class CWMPManager {
             if(segment == '') {
                 current._writable = (data[key].writable == "true") ? true : false;
                 current._value = this.get_obj_value(value_tree, segments.join('.'));
+                current._type = v[segments.join('.')];
             }else if (i === segments.length - 1) {
                 current[segment] = { 
                     _writable: (data[key].writable == "true") ? true : false,
-                    _value: this.get_obj_value(value_tree, segments.join('.'))
+                    _value: this.get_obj_value(value_tree, segments.join('.')),
+                    _type: v[segments.join('.')]
                 };
             } else {
               if (!current[segment]) {
@@ -217,6 +228,20 @@ class CWMPManager {
         return node['_value'] !== undefined ? node['_value']['_'] : undefined;
     }
 
+    get_obj_data_type(obj, path) {
+        let path_array = path.split('.');
+        let node = obj;
+        path_array.forEach((p) => {
+            if(node[p] !== undefined) {
+                node = node[p];
+            }
+        });
+
+        console.log(node);
+
+        return node['_type'] !== undefined ? node['_type'] : undefined;
+    }
+
     add_task(device_id, task, props, callback) {
         if(this.tasks[device_id] == undefined) {
             this.tasks[device_id] = [];
@@ -227,9 +252,14 @@ class CWMPManager {
     gather_all_data(device_id, inform_data) {
         return new Promise(resolve => {
             this.add_task(device_id, 'get_all_params', {device_path: 'Device.' }, (ps) => {
-                if(ps != undefined) {
-                    resolve(this.create_parameter_info_tree(ps.parameterlist.parameterinfostruct, inform_data['parameterlist']['parametervaluestruct']));
-                }
+                this.add_task(device_id, 'get_all_param_values', {device_path: 'Device.'}, (vs) => {
+                    //console.log(ps);    
+                    //console.log(vs.parameterlist.parametervaluestruct);
+                    if(ps != undefined) {
+                        //resolve(this.create_parameter_info_tree(ps.parameterlist.parameterinfostruct, inform_data['parameterlist']['parametervaluestruct']));
+                        resolve(this.create_parameter_info_tree(ps.parameterlist.parameterinfostruct, vs.parameterlist.parametervaluestruct));
+                    }
+                })
             }); 
         }) 
     }
@@ -329,6 +359,22 @@ let _get_all_params = (device_path) => {
                 <ParameterPath>${device_path}</ParameterPath>
                 <NextLevel>0</NextLevel>
             </cwmp:GetParameterNames>
+        </soapenv:Body>
+    </soapenv:Envelope>
+    </xml>`;
+
+    return xml;
+}
+
+let _get_all_param_values = (device_path) => {
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+    <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+        <soapenv:Body>
+            <cwmp:GetParameterValues>
+                <ParameterNames soap-enc:arrayType="xsd:string[1]">
+                    <string>${device_path}</string>
+                </ParameterNames>
+            </cwmp:GetParameterValues>
         </soapenv:Body>
     </soapenv:Envelope>
     </xml>`;
